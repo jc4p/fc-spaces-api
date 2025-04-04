@@ -104,7 +104,15 @@ async function fetchFromHMS(endpoint, options = {}) {
 async function getRoomParticipantCount(roomId) {
   try {
     const response = await fetchFromHMS(`/sessions?room_id=${roomId}&active=true`);
-    return response?.data?.length || 0;
+    
+    // If no sessions data
+    if (!response?.data || !response.data.length) {
+      return 0;
+    }
+    
+    // Count active peers (without a left_at timestamp)
+    const activePeers = Object.values(response.data[0].peers || {}).filter(peer => !peer.left_at);
+    return activePeers.length;
   } catch (error) {
     console.error(`Error fetching participant count for room ${roomId}:`, error);
     return 0;
