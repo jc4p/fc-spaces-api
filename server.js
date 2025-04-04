@@ -12,6 +12,8 @@ const HMS_API_BASE = process.env.HMS_API_BASE || 'https://api.100ms.live/v2';
 const RATE_LIMIT_WINDOW_MS = parseInt(process.env.RATE_LIMIT_WINDOW_MS || '600000', 10);
 const MAX_REQUESTS_PER_WINDOW = parseInt(process.env.MAX_REQUESTS_PER_WINDOW || '300', 10);
 const ROOM_NAME_PREFIX = process.env.ROOM_NAME_PREFIX || 'fariscope-room';
+const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
+const ROOM_TIMEOUT_MS = parseInt(process.env.ROOM_TIMEOUT_MS || '300000', 10); // 5 minutes
 
 // Token management
 let managementToken = '';
@@ -152,6 +154,59 @@ function validateFid(fid) {
   return !isNaN(numFid) && numFid > 0 && Number.isInteger(numFid);
 }
 
+async function fetchUsername(fid) {
+  if (!NEYNAR_API_KEY) {
+    console.warn('NEYNAR_API_KEY not set, using fallback room name');
+    return null;
+  }
+  
+  try {
+    const response = await fetch(`https://api.neynar.com/v2/farcaster/user/bulk?fids=${fid}`, {
+      headers: {
+        'accept': 'application/json',
+        'x-api-key': NEYNAR_API_KEY
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Neynar API error: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    if (data.users && data.users.length > 0 && data.users[0].username) {
+      return data.users[0].username;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching username:', error);
+    return null;
+  }
+}
+
+async function checkInactiveRooms() {
+  const now = Date.now();
+  const cutoff = now - ROOM_TIMEOUT_MS;
+  
+  for (const [roomId, roomData] of roomStore.entries()) {
+    if (roomData.disabled) continue;
+    
+    const lastActivityTime = new Date(roomData.lastActivity).getTime();
+    if (lastActivityTime < cutoff) {
+      console.log(`Room ${roomId} inactive for more than ${ROOM_TIMEOUT_MS/60000} minutes, disabling`);
+      try {
+        await disableRoom(roomId);
+        roomStore.set(roomId, {
+          ...roomData,
+          disabled: true,
+          lastActivity: new Date().toISOString()
+        });
+      } catch (error) {
+        console.error(`Failed to disable inactive room ${roomId}:`, error);
+      }
+    }
+  }
+}
+
 function checkRateLimit(ip) {
   const now = Date.now();
   const windowStart = now - RATE_LIMIT_WINDOW_MS;
@@ -272,6 +327,9 @@ const app = new Elysia()
         throw new Error('Invalid FID format');
       }
 
+      // Fetch username from Neynar if API key is available
+      const username = await fetchUsername(fid);
+      const displayName = username ? `@${username}'s Chatroom` : `Audio Chat With FID: ${fid}`;
       const roomName = `${ROOM_NAME_PREFIX}-${fid}`;
       
       // Check for existing room
@@ -293,11 +351,11 @@ const app = new Elysia()
           method: 'POST',
           body: JSON.stringify({
             name: roomName,
-            description: `Fariscope room for FID: ${fid}`,
+            description: displayName,
             template_id: TEMPLATE_ID
           })
         });
-        console.log(`Created new room: ${roomName}`);
+        console.log(`Created new room: ${roomName} with display name: ${displayName}`);
       }
 
       // Create streamer code
@@ -325,7 +383,7 @@ const app = new Elysia()
     try {
       checkRateLimit(headers['x-forwarded-for'] || 'unknown');
       
-      const { roomId, fid } = body;
+      const { roomId, fid, address } = body;
       
       if (!roomId || !fid) {
         throw new Error('Missing required fields: roomId and fid');
@@ -335,13 +393,21 @@ const app = new Elysia()
         throw new Error('Invalid FID format');
       }
       
+      if (address && !validateAddress(address)) {
+        throw new Error('Invalid ETH address format');
+      }
+      
       const roomData = roomStore.get(roomId);
       if (!roomData) {
         throw new Error('Room not found');
       }
-
-      // Create viewer code
-      const viewerCode = await createRoomCode(roomId, 'fariscope-viewer');
+      
+      // Determine if the user is the room creator
+      const isCreator = roomData.fid === fid && (!address || roomData.address === address);
+      const role = isCreator ? 'fariscope-streamer' : 'fariscope-viewer';
+      
+      // Create appropriate role code
+      const roleCode = await createRoomCode(roomId, role);
       
       // Update last activity
       roomStore.set(roomId, {
@@ -350,7 +416,8 @@ const app = new Elysia()
       });
 
       return {
-        code: viewerCode.code
+        code: roleCode.code,
+        role: role
       };
     } catch (error) {
       throw new Error(error.message);
@@ -408,10 +475,17 @@ const app = new Elysia()
     port: 8000
   });
 
+// Setup periodic room activity checking
+const INACTIVE_CHECK_INTERVAL = 60000; // Check every minute
+
 // Initialize token and rooms on startup
 try {
   generateInitialToken();
   initializeRoomStore();
+  
+  // Start periodic checking for inactive rooms
+  setInterval(checkInactiveRooms, INACTIVE_CHECK_INTERVAL);
+  console.log(`🕒 Room inactivity checker started (timeout: ${ROOM_TIMEOUT_MS/60000} minutes)`);
 } catch (error) {
   console.error('❌ Initialization error:', error.message);
   process.exit(1);
