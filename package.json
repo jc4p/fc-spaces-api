@@ -1,0 +1,16 @@
+{
+  "name": "fariscope-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch server.js",
+    "start": "bun run server.js"
+  },
+  "dependencies": {
+    "@elysiajs/cors": "^1.0.2",
+    "dotenv": "^16.4.7",
+    "elysia": "^1.2.11",
+    "jsonwebtoken": "^9.0.2",
+    "uuid4": "^2.0.3"
+  }
+}
