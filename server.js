@@ -329,7 +329,9 @@ const app = new Elysia()
 
       // Fetch username from Neynar if API key is available
       const username = await fetchUsername(fid);
-      const displayName = username ? `@${username}'s Chatroom` : `Audio Chat With FID: ${fid}`;
+      // Filter username to only include allowed characters (a-z, A-Z, 0-9, and . - :)
+      const cleanUsername = username ? username.replace(/[^a-zA-Z0-9.\-:]/g, '') : null;
+      const displayName = cleanUsername ? `Chat with ${cleanUsername}` : `Audio Chat With FID: ${fid}`;
       const roomName = `${ROOM_NAME_PREFIX}-${fid}`;
       
       // Check for existing room
