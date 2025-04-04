@@ -419,7 +419,8 @@ const app = new Elysia()
 
       return {
         code: roleCode.code,
-        role: role
+        role: role,
+        serverIsCreator: isCreator
       };
     } catch (error) {
       throw new Error(error.message);
