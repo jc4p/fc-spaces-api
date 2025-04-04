@@ -101,6 +101,16 @@ async function fetchFromHMS(endpoint, options = {}) {
   }
 }
 
+async function getRoomParticipantCount(roomId) {
+  try {
+    const response = await fetchFromHMS(`/sessions?room_id=${roomId}&active=true`);
+    return response?.data?.length || 0;
+  } catch (error) {
+    console.error(`Error fetching participant count for room ${roomId}:`, error);
+    return 0;
+  }
+}
+
 async function createRoomCode(roomId, role) {
   return fetchFromHMS(`/room-codes/room/${roomId}/role/${role}`, {
     method: 'POST'
@@ -289,13 +299,20 @@ const app = new Elysia()
         };
       }
       
-      // Filter for fariscope rooms and enhance with metadata
-      const enhancedData = response.data
-        .filter(room => room.name.startsWith(ROOM_NAME_PREFIX))
-        .map(room => ({
+      // Filter for fariscope rooms 
+      const fariscopeRooms = response.data.filter(room => room.name.startsWith(ROOM_NAME_PREFIX));
+      
+      // Get participant counts for all rooms in parallel
+      const participantPromises = fariscopeRooms.map(async (room) => {
+        const participantCount = await getRoomParticipantCount(room.id);
+        return {
           ...room,
-          metadata: roomStore.get(room.id) || null
-        }));
+          metadata: roomStore.get(room.id) || null,
+          participant_count: participantCount
+        };
+      });
+      
+      const enhancedData = await Promise.all(participantPromises);
       
       return {
         limit: response.limit || 10,
