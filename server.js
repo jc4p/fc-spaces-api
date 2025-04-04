@@ -404,8 +404,21 @@ const app = new Elysia()
         throw new Error('Room not found');
       }
       
-      // Determine if the user is the room creator
-      const isCreator = roomData.fid === fid && (!address || roomData.address === address);
+      // Debug logging
+      console.log(`Join room check: User ${fid} (address: ${address || 'none'}) joining room created by FID ${roomData.fid} (address: ${roomData.address || 'none'})`);
+      
+      // Updated creator detection logic with FID string comparison
+      const fidMatches = roomData.fid.toString() === fid.toString();
+      // Safely compare addresses accounting for undefined/null
+      const addressMatches = address && roomData.address ?
+                            address.toLowerCase() === roomData.address.toLowerCase() :
+                            false;
+                            
+      // Creator if FID matches, with address match as additional validation
+      const isCreator = fidMatches && (!address || addressMatches);
+      
+      console.log(`Creator check result: ${isCreator}, fidMatches: ${fidMatches}`);
+      
       const role = isCreator ? 'fariscope-streamer' : 'fariscope-viewer';
       
       // Create appropriate role code
@@ -419,7 +432,7 @@ const app = new Elysia()
 
       return {
         code: roleCode.code,
-        role: role,
+        serverRole: role,
         serverIsCreator: isCreator
       };
     } catch (error) {
